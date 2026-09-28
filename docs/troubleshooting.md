@@ -67,3 +67,17 @@
 | `BucketAlreadyExists` for the target bucket | Global S3 namespace | Set `target_bucket_name` in account-b tfvars |
 | `DeleteConflict` destroying users | Keys/MFA added out of band | `force_destroy = true` handles it; otherwise delete keys first |
 | Task 3 POC shows `System.Object[]` or wrong counts | PowerShell 1-element-array unrolling | Use the committed script (the helper keeps arrays intact) |
+
+## Task 4
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `denied: ... not authorized to perform: ecr:InitiateLayerUpload` on push | Pushing to a repository other than `ci_ecr_repository_name`, or wrong region/account in the ARN | Tag the image for the configured repository; check `terraform output ci_policy_targets` |
+| `no basic auth credentials` on push | `docker login` not done or token expired (12 h) | `aws ecr get-login-password \| docker login ...` |
+| `not authorized to perform: iam:PassRole` on register-task-definition | Task definition references a role other than the two configured roles | Use exactly `ci_ecs_task_execution_role_name` / `ci_ecs_task_role_name`, or change the variables deliberately |
+| `AccessDeniedException` on `ecs:DescribeTaskDefinition` | Pipeline downloads the live task definition; deliberately not granted | Keep the task definition in the repo, or add a documented `*` exception (NOTES.md Q8) |
+| `AccessDeniedException` on update-service | Different service/cluster than configured | Check `ci_ecs_cluster_name` / `ci_ecs_service_name` |
+| `aws ecs wait services-stable` fails with AccessDenied | Service ARN mismatch (`DescribeServices` is scoped) | Same as above |
+| `AccessDenied` on `s3 cp` upload / `s3 rm` | Read-only by design | Intended |
+| POC-4 "rendered policy == policies/ci-policy.json" FAIL | Policy changed in `ci-policy.tf` but not in the reference JSON (or vice versa) | Update both; the check is intentional drift protection |
+| POC comparisons print `System.Object[]` / odd booleans | PowerShell: binary `-join` binds looser than `-eq`; nested arrays | The committed script uses `Join-Sorted`; don't inline `-join` inside comparisons |

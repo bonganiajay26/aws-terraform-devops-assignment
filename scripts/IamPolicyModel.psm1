@@ -5,8 +5,9 @@
       - identity policies: explicit Deny > Allow > implicit deny
       - Action / NotAction with * and ? wildcards (case-insensitive)
       - Resource with wildcards and the ${aws:username} policy variable
-      - Condition: only "Bool" on keys supplied in the request context
-        (e.g. aws:MultiFactorAuthPresent); any other condition => no match
+      - Condition: only "Bool" and "StringEquals" on keys supplied in the request
+        context (e.g. aws:MultiFactorAuthPresent, iam:PassedToService); a missing
+        key or any other operator => no match
       - trust policies: Principal.AWS exact ARN, account root, or "*"
       - AssumeRole = identity side AND trust side (same-account exception when
         the trust policy names the caller explicitly)
@@ -41,7 +42,10 @@ function Test-Conditions {
     param($Condition, [hashtable]$Context)
     if ($null -eq $Condition) { return $true }
     foreach ($operator in $Condition.PSObject.Properties) {
-        if ($operator.Name -ne 'Bool') { return $false }
+        # Bool and StringEquals: exact value match, but compared CASE-INSENSITIVELY
+        # (PowerShell -contains). AWS StringEquals is case-sensitive - a known,
+        # documented simplification of this model; all test values use canonical case.
+        if (@('Bool', 'StringEquals') -notcontains $operator.Name) { return $false }
         foreach ($key in $operator.Value.PSObject.Properties) {
             if (-not $Context.ContainsKey('ConditionKeys')) { return $false }
             $supplied = $Context.ConditionKeys[$key.Name]

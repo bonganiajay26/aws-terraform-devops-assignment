@@ -40,6 +40,29 @@ The Task 2 lock demo (local backend) proves only that **Terraform refused a comp
 local-state writer**. It does NOT prove S3 remote state or DynamoDB locking. Those
 are REAL AWS POC items, still pending.
 
+### IAM policy model (Tasks 3-4)
+
+`scripts/IamPolicyModel.psm1` evaluates the **Terraform-rendered** policy JSON
+from the offline plans. It models identity policies (explicit Deny > Allow >
+implicit deny), trust policies (exact ARN / account root / `*`), `Action` /
+`NotAction` wildcards, `${aws:username}`, and the `Bool` / `StringEquals`
+conditions used here (`aws:MultiFactorAuthPresent`, `iam:PassedToService`).
+
+It is a **POC model only**. It does not model SCPs, permission boundaries,
+session policies, resource policies other than trust, or other condition
+operators, and it compares condition values case-insensitively, whereas AWS
+`StringEquals` is case-sensitive. Its results are labelled "model, not AWS". The AWS counterpart is
+`aws iam simulate-principal-policy` plus the live tests in `tests/task3-test.md`
+and `tests/task4-test.md`.
+
+### Reference-policy drift check (Task 4)
+
+`policies/ci-policy.json` must stay semantically identical to the policy rendered
+from `account-a/ci-policy.tf`. POC-4 compares both in an order-independent form
+(statements, actions, resources and conditions). The comparison was
+mutation-tested: an added action, a widened resource or a changed condition each
+make it fail.
+
 ## Phase 2 - REAL AWS POC VALIDATION (when accounts exist)
 
 `terraform plan` / `apply`, AWS CLI verification, positive and negative access tests.

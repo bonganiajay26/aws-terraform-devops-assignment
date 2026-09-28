@@ -138,3 +138,73 @@ variable "console_pgp_key" {
     error_message = "console_pgp_key must be null or a non-empty PGP key / keybase:<user> reference."
   }
 }
+
+# ------------------------- Task 4 - CI policy targets -------------------------
+# Names of EXISTING (or separately provisioned) resources the ci user may use.
+# Exact ARNs are built in ci-policy.tf from these names + account_a_id + aws_region.
+
+variable "ci_ecr_repository_name" {
+  description = "The ONE ECR repository ci may push to."
+  type        = string
+  default     = "aws-terraform-devops-assignment-app"
+
+  validation {
+    condition     = can(regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$", var.ci_ecr_repository_name)) && length(var.ci_ecr_repository_name) <= 256
+    error_message = "ci_ecr_repository_name must be a valid ECR repository name (lowercase, digits, . _ - /) and no wildcard."
+  }
+}
+
+variable "ci_ecs_cluster_name" {
+  description = "ECS cluster that contains the ONE service ci may deploy."
+  type        = string
+  default     = "aws-terraform-devops-assignment-cluster"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_-]{1,255}$", var.ci_ecs_cluster_name))
+    error_message = "ci_ecs_cluster_name must be 1-255 letters, digits, hyphens or underscores (no wildcard)."
+  }
+}
+
+variable "ci_ecs_service_name" {
+  description = "The ONE ECS service ci may update."
+  type        = string
+  default     = "aws-terraform-devops-assignment-service"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_-]{1,255}$", var.ci_ecs_service_name))
+    error_message = "ci_ecs_service_name must be 1-255 letters, digits, hyphens or underscores (no wildcard)."
+  }
+}
+
+variable "ci_ecs_task_execution_role_name" {
+  description = "ECS task EXECUTION role referenced by the task definition (image pull, logs). ci may pass only this role and the task role."
+  type        = string
+  default     = "aws-terraform-devops-assignment-ecs-execution"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9+=,.@_-]{1,64}$", var.ci_ecs_task_execution_role_name))
+    error_message = "ci_ecs_task_execution_role_name must be a valid IAM role name (no wildcard)."
+  }
+}
+
+variable "ci_ecs_task_role_name" {
+  description = "ECS TASK role (application permissions) referenced by the task definition."
+  type        = string
+  default     = "aws-terraform-devops-assignment-ecs-task"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9+=,.@_-]{1,64}$", var.ci_ecs_task_role_name))
+    error_message = "ci_ecs_task_role_name must be a valid IAM role name (no wildcard)."
+  }
+}
+
+variable "ci_artifact_bucket_name" {
+  description = "The ONE build-artifact bucket ci may read. null = \"<project_name>-artifacts-<account_a_id>\"."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.ci_artifact_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.ci_artifact_bucket_name))
+    error_message = "ci_artifact_bucket_name must be a valid S3 bucket name (no wildcard)."
+  }
+}

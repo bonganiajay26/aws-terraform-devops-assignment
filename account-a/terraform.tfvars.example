@@ -76,3 +76,14 @@ console_user_names = ["developer1", "developer2"]
 # (state/outputs then hold only the encrypted password). Leave unset to keep all
 # passwords out of Terraform and provision them out of band (tests/task3-test.md).
 # console_pgp_key = "keybase:your-keybase-user"
+
+# ------------------------- Task 4 - CI policy targets -------------------------
+# The ONE repository / service / role pair / bucket the ci user may use.
+# These resources are NOT created by this repository; exact ARNs are built from
+# these names + account_a_id + aws_region (see ci-policy.tf). No wildcards allowed.
+ci_ecr_repository_name          = "aws-terraform-devops-assignment-app"
+ci_ecs_cluster_name             = "aws-terraform-devops-assignment-cluster"
+ci_ecs_service_name             = "aws-terraform-devops-assignment-service"
+ci_ecs_task_execution_role_name = "aws-terraform-devops-assignment-ecs-execution"
+ci_ecs_task_role_name           = "aws-terraform-devops-assignment-ecs-task"
+# ci_artifact_bucket_name       = "my-build-artifacts"   # default: <project>-artifacts-<account_a_id>

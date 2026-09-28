@@ -60,3 +60,23 @@ output "role_b_arn" {
   description = "roleB - may only assume roleC. Must equal the principal trusted by roleC in Account B."
   value       = aws_iam_role.role_b.arn
 }
+
+# ----------------------------- Task 4 - CI -----------------------------
+
+output "ci_policy_arn" {
+  description = "Customer-managed least-privilege policy attached to the ci user."
+  value       = aws_iam_policy.ci.arn
+}
+
+output "ci_policy_targets" {
+  description = "Exact resources the ci policy is scoped to."
+  value = {
+    ecr_repository      = local.ci_ecr_repository_arn
+    ecs_service         = local.ci_ecs_service_arn
+    ecs_execution_role  = local.ci_execution_role_arn
+    ecs_task_role       = local.ci_task_role_arn
+    artifact_bucket     = local.ci_artifact_bucket
+    artifact_objects    = "${local.ci_artifact_bucket}/*"
+    wildcard_exceptions = ["ecr:GetAuthorizationToken", "ecs:RegisterTaskDefinition"]
+  }
+}

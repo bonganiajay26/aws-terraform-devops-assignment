@@ -53,8 +53,8 @@
 | 4 | Would engine/ci long-lived access keys be used in real production? | [Answered below](#q4---would-engineci-long-lived-access-keys-be-used-in-real-production) |
 | 5 | What should be used instead? | [Answered below](#q5---what-should-be-used-instead) |
 | 6 | Why is trusting Account A root broader than trusting the roleB ARN? | [Answered below](#q6---why-is-trusting-account-a-root-broader-than-trusting-the-roleb-arn) |
-| 7 | What permissions were deliberately excluded from CI? | Task 4 |
-| 8 | Why were those permissions excluded? | Task 4 |
+| 7 | What permissions were deliberately excluded from CI? | [Answered below](#q7---what-permissions-were-deliberately-excluded-from-ci) |
+| 8 | Why were those permissions excluded? | [Answered below](#q8---why-were-those-permissions-excluded) |
 | 9 | Why was the original roleC trust policy broken? | Task 5 |
 | 10 | Why was `Resource "*"` wrong for roleC S3 permissions? | Task 5 |
 
@@ -397,3 +397,93 @@ Caveat: an exact role ARN is resolved to the role's internal unique ID when the
 policy is saved. If roleB is deleted and recreated, roleC's trust shows an ID
 instead of the ARN and stops working until roleC is re-applied. That's a safety
 feature: a new role with the same name doesn't inherit the trust.
+
+## Task 4 - CI least-privilege policy
+
+### What ci can do
+
+A customer-managed policy `ci-least-privilege` (`account-a/ci-policy.tf`,
+reference copy `policies/ci-policy.json`) is attached to the **ci user only**
+(not group1, so `engine` does not inherit it):
+
+| Capability | Actions | Resource |
+|---|---|---|
+| ECR login | `ecr:GetAuthorizationToken` | `*` (required, see below) |
+| ECR push, one repository | `BatchCheckLayerAvailability`, `GetDownloadUrlForLayer`, `InitiateLayerUpload`, `UploadLayerPart`, `CompleteLayerUpload`, `PutImage` | `arn:aws:ecr:<region>:<acct>:repository/<repo>` |
+| New task definition revision | `ecs:RegisterTaskDefinition` | `*` (required, see below) |
+| Deploy one service | `ecs:UpdateService`, `ecs:DescribeServices` | `arn:aws:ecs:<region>:<acct>:service/<cluster>/<service>` |
+| Pass the task roles | `iam:PassRole` | exact execution-role and task-role ARNs, only when `iam:PassedToService = ecs-tasks.amazonaws.com` |
+| Read artifacts | `s3:ListBucket` / `s3:GetObject` | `arn:aws:s3:::<bucket>` / `arn:aws:s3:::<bucket>/*` |
+
+The target resources are **not** created by this repository. They are named by
+variables, so the task stays a least-privilege *policy* exercise rather than an
+application build.
+
+### Wildcard resources: the documented exceptions
+
+`Resource = "*"` is used only where the AWS authorization model requires it, such
+as `ecr:GetAuthorizationToken` and `ecs:RegisterTaskDefinition`.
+Resource-scopable deployment operations remain restricted to their exact
+ECR/ECS/IAM/S3 ARNs.
+
+- **`ecr:GetAuthorizationToken`** has no resource type. It returns a login token
+  for the account's registry. The token alone grants nothing, because every image
+  operation is still authorized separately against the repository ARN. So
+  "login anywhere" does not mean "push anywhere" (test C).
+- **`ecs:RegisterTaskDefinition`** *creates* a new `family:revision`. There is no
+  existing ARN to scope to before the call, so it can't be restricted to a
+  specific task-definition ARN. The dangerous part of a task definition, the
+  roles it runs with, is still constrained, because registering a definition that
+  references a role requires `iam:PassRole`, which is limited to the two exact
+  role ARNs and to ECS tasks. (Optional further hardening: require request tags
+  via `aws:RequestTag` conditions.)
+- Each exception is in **its own statement with a single action**, so the `*`
+  can't leak onto other actions. The POC verifies that no other statement uses
+  `*`, a partial-wildcard ARN (other than `bucket/*`) or an action wildcard.
+
+### Q7 - What permissions were deliberately excluded from CI?
+
+| Excluded | Examples |
+|---|---|
+| Broad managed policies | `AdministratorAccess`, `PowerUserAccess`, `AmazonS3FullAccess`, `AmazonECS_FullAccess`, `AmazonEC2ContainerRegistryFullAccess`, `AmazonEC2ContainerRegistryPowerUser` |
+| Action wildcards | `ecr:*`, `ecs:*`, `s3:*`, `iam:*` |
+| ECR management and pull | `ecr:BatchDeleteImage`, `DeleteRepository`, `CreateRepository`, `SetRepositoryPolicy`, `DeleteRepositoryPolicy`, `PutLifecyclePolicy`, `PutImageTagMutability`, `BatchGetImage`, `DescribeImages` |
+| ECS beyond one service update | `ecs:CreateService`, `DeleteService`, `CreateCluster`, `DeleteCluster`, `RunTask`, `StartTask`, `StopTask`, `DeregisterTaskDefinition`, `DescribeTaskDefinition`, `ExecuteCommand`, `UpdateService` on any other service |
+| S3 writes | `s3:PutObject`, `DeleteObject`, `DeleteObjectVersion`, `PutObjectAcl`, `PutBucketPolicy`, `DeleteBucket`, and **any** access to other buckets |
+| IAM | Everything except the scoped `iam:PassRole`: no `CreateUser`, `CreateRole`, `Attach*Policy`, `Put*Policy`, `CreateAccessKey`, `UpdateAssumeRolePolicy`; no `iam:PassRole` on other roles or to other services |
+| Role assumption | `sts:AssumeRole` (ci cannot enter roleB/roleC or roleA) |
+| Everything else | EC2, Lambda, CloudFormation, logs, secrets, KMS administration and so on |
+
+### Q8 - Why were those permissions excluded?
+
+- **Managed "FullAccess"/PowerUser policies** cover every resource of a service,
+  or every service. A leaked CI credential (the most exposed credential in most
+  organizations) would then be able to delete repositories, rewrite any bucket or
+  stop every service. The assignment asks for one repository, one service and one
+  bucket, and the policy says exactly that.
+- **ECR delete/management:** the pipeline only *adds* images. Deleting images or
+  repositories, or changing repository policies, could destroy rollback targets or
+  open the repository to other accounts. Pull (`BatchGetImage`) is not needed,
+  because the ECS **execution role** pulls the image at runtime, not CI.
+  `GetDownloadUrlForLayer` is kept, read-only on the same repository, because
+  docker/buildx reuse existing layers during push.
+- **ECS create/delete/run:** CI deploys a new revision to an existing service.
+  Creating services or running ad-hoc tasks would let a compromised pipeline run
+  arbitrary containers, possibly with other roles. `DescribeTaskDefinition` is
+  omitted because the pipeline registers a task definition kept in the repository.
+  If it had to download the live definition first, that action (which also
+  requires `*`) would be the one extra exception to add.
+- **`iam:PassRole` scoped to two ARNs and `ecs-tasks.amazonaws.com`:** `PassRole`
+  on `*` is a classic privilege escalation. CI could register a task definition,
+  or create a Lambda function, that runs with an administrator role. The condition
+  also stops the allowed roles from being handed to Lambda or EC2.
+- **S3 write/delete:** artifacts are inputs to the deployment. Write access would
+  let a compromised pipeline poison artifacts for later builds, and delete access
+  would destroy them. `ListBucket` and `GetObject` cover "read artifacts".
+- **Other IAM and `sts:AssumeRole`:** CI must not be able to change its own
+  permissions, mint new credentials, or hop into other roles, including the
+  cross-account path, which belongs to `engine`.
+- **General principle:** every permission is a capability an attacker inherits if
+  the CI credential leaks. The production recommendation (Q5) is to replace the
+  `ci` IAM user with a **GitHub OIDC role** carrying this same policy, so there is
+  no long-lived key to leak in the first place.

@@ -50,7 +50,10 @@ $requiredFiles = @(
     # Task 3
     'account-a/iam-users-groups.tf', 'account-a/role-a.tf', 'account-a/role-b.tf',
     'account-b/s3.tf', 'account-b/role-c.tf', 'account-b/outputs.tf',
-    'scripts/IamPolicyModel.psm1', 'scripts/task3-local-poc.ps1', 'tests/task3-test.md'
+    'scripts/IamPolicyModel.psm1', 'scripts/task3-local-poc.ps1', 'tests/task3-test.md',
+    # Task 4
+    'account-a/ci-policy.tf', 'policies/ci-policy.json', 'policies/README.md',
+    'scripts/task4-local-poc.ps1', 'tests/task4-test.md'
 )
 
 function Write-Step {

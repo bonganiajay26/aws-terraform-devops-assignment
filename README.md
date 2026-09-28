@@ -16,7 +16,7 @@ locking, multi-account IAM, a least-privilege CI policy and a trust-policy bug f
 | 1 | Five EC2 instances from one `map(object)` + `for_each`, `prevent_destroy` | Done (local POC); real-AWS POC pending |
 | 2 | S3 remote state + DynamoDB locking (bootstrap stack) | Done (local POC); real-AWS POC pending |
 | 3 | Multi-account IAM: groups, users, roleA, roleB, roleC | Done (local POC); real-AWS POC pending |
-| 4 | CI least-privilege policy (ECR / ECS / S3 read) | Planned |
+| 4 | CI least-privilege policy (ECR / ECS / S3 read) | Done (local POC); real-AWS POC pending |
 | 5 | Find and fix the roleC trust and S3 policy bugs | Planned |
 
 ## 2. Assignment requirements
@@ -300,7 +300,48 @@ calls between two accounts are in `tests/task3-test.md`.
 
 ## 9. Task 4 - CI least-privilege policy
 
-_Implemented in Task 4._
+**Files:** `account-a/ci-policy.tf`, `policies/ci-policy.json` (reference copy,
+drift-checked), `policies/README.md`.
+
+```mermaid
+flowchart LR
+    CI["ci user<br/>policy: ci-least-privilege"]
+    CI -->|"GetAuthorizationToken (*)"| AUTH[ECR registry login]
+    CI -->|"push actions"| REPO[("ECR repo<br/>exact ARN")]
+    CI -->|"RegisterTaskDefinition (*)"| TD[new task-def revision]
+    CI -->|"PassRole + PassedToService=ecs-tasks"| ROLES["execution role +<br/>task role (exact ARNs)"]
+    CI -->|"UpdateService / DescribeServices"| SVC["ECS service<br/>exact ARN"]
+    CI -->|"ListBucket / GetObject"| ART[("artifact bucket<br/>read only")]
+```
+
+| Requirement | Implementation |
+|---|---|
+| Push to ONE ECR repo | 6 push actions on the exact repository ARN, plus `GetAuthorizationToken` (`*` required) |
+| Deploy to ONE ECS service | `RegisterTaskDefinition` (`*` required) + `UpdateService`/`DescribeServices` on the exact service ARN |
+| Task roles | `iam:PassRole` on the exact execution- and task-role ARNs, `iam:PassedToService = ecs-tasks.amazonaws.com` |
+| Read ONE artifact bucket | `s3:ListBucket` on the bucket ARN, `s3:GetObject` on `bucket/*`. No write or delete |
+| No broad policies | custom policy only, attached to the `ci` user only |
+
+`Resource "*"` appears only for `ecr:GetAuthorizationToken` and
+`ecs:RegisterTaskDefinition`, where AWS offers no resource-level scoping. Each is
+isolated in its own single-action statement. Excluded permissions and the reasons
+are in NOTES.md Q7/Q8.
+
+The ECR repository, ECS service, task roles and bucket are **not** created here.
+They are named by `ci_*` variables and the exact ARNs are built from them.
+
+### Local POC
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\task4-local-poc.ps1
+```
+
+This checks the policy structure, the rendered JSON (identical to
+`policies/ci-policy.json`), the wildcard exceptions, that no broad managed
+policies or excluded actions are present, the access matrix A-Q with the
+**simplified IAM model** (POC model only), and that wildcard target names are
+rejected. **Real ECR push / ECS deploy / PassRole / S3 read: REAL AWS POC PENDING**
+(`tests/task4-test.md`).
 
 ## 10. Task 5 - Bug fix
 
