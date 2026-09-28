@@ -48,8 +48,8 @@
 | # | Question | Answered in |
 |---|---|---|
 | 1 | Which EC2 instance is protected and why? | [Answered below](#q1---which-ec2-instance-is-protected-and-why) |
-| 2 | What happens with local state when multiple engineers operate on the same infrastructure? | Task 2 |
-| 3 | How do S3 remote state and locking help? | Task 2 |
+| 2 | What happens with local state when multiple engineers operate on the same infrastructure? | [Answered below](#q2---what-happens-with-local-state-when-multiple-engineers-operate-on-the-same-infrastructure) |
+| 3 | How do S3 remote state and locking help? | [Answered below](#q3---how-do-s3-remote-state-and-locking-help) |
 | 4 | Would engine/ci long-lived access keys be used in real production? | Task 3 |
 | 5 | What should be used instead? | Task 3 |
 | 6 | Why is trusting Account A root broader than trusting the roleB ARN? | Task 3 |
@@ -134,3 +134,112 @@ Terraform 1.5.4 returns `Error: Variables not allowed` for that line.
   web01's baseline gp3.
 - The rules are enforced by `validation` blocks. Seven negative fixtures prove that
   bad inputs fail at plan time, before any AWS call.
+
+## Task 2 - Remote state and locking
+
+### Q2 - What happens with local state when multiple engineers operate on the same infrastructure?
+
+```
+Developer A (laptop A: terraform.tfstate v1) ----\
+                                                   >---> SAME AWS account
+Developer B (laptop B: terraform.tfstate v1) ----/
+```
+
+Each engineer has a **private, divergent copy** of the truth, and Terraform trusts
+whichever copy it reads. Concretely:
+
+1. **Duplicate resources.** A applies and creates web01. B's state doesn't know
+   about it, so B's apply creates a *second* web01 (or fails on a name clash, for
+   uniquely named resources like S3 buckets and IAM roles).
+2. **Silent overwrites / drift.** A changes web04 to t3.xlarge. B, with the old
+   state and code, plans "t3.large -> no change", or reverts A's change on the next apply.
+3. **Destructive plans.** B removes something from the code that only B's state
+   tracks, or B's state is older than reality. Terraform plans destroys of resources
+   A depends on, and nobody sees the full picture in either plan.
+4. **Orphaned resources.** Resources recorded only in A's state become invisible
+   to B. If A's laptop dies, nobody can manage or destroy them with Terraform again.
+5. **No concurrency control.** Two applies run at the same time against the same
+   resources. API calls interleave, and the state written last wins, so whatever
+   the other apply created is lost from state.
+6. **Secrets on laptops.** Every copy of state holds sensitive values in plain
+   text, outside any access control or audit trail.
+
+Sharing the file through Git or a network drive doesn't fix this. Git has no
+locking, merge conflicts corrupt JSON state, and copies go stale immediately.
+
+### Q3 - How do S3 remote state and locking help?
+
+| Problem | Solved by |
+|---|---|
+| Divergent copies | **One** state object per stack in S3 (`account-a/terraform.tfstate`, `account-b/terraform.tfstate`). Every engineer and pipeline reads and writes the same object. |
+| Concurrent applies | **DynamoDB lock**. Before any state-changing operation, Terraform does a *conditional* PutItem of `LockID = "<bucket>/<key>"`. A second process fails with `Error acquiring the state lock` (Lock Info shows who and when), or waits with `-lock-timeout`. The lock is deleted when the operation ends. |
+| Bad write / corruption / accidental delete | **S3 versioning**. Every write is a new version, so any earlier state can be restored. The lifecycle rule keeps the newest 10 old versions and expires older ones after 90 days. |
+| Secrets in state | **SSE** (AES256, or KMS via `kms_key_arn`), `encrypt = true` in the backend, TLS-only bucket policy, all public access blocked, ACLs disabled. Access is controlled by IAM and auditable with CloudTrail. |
+| Losing the state store | `prevent_destroy` on bucket and table, `force_destroy = false`, DynamoDB deletion protection, point-in-time recovery. |
+| One stack blocking another | Separate keys mean separate state files and separate lock items. account-a work never blocks account-b. |
+
+Locking does not merge changes. It serializes them, so the second engineer re-plans
+against the state the first one wrote.
+
+### The bootstrap problem
+
+A backend must exist before `terraform init` can use it. `bootstrap/` is applied
+once with **local** state to create the bucket and table. Only then can
+`account-a`/`account-b` run `terraform init -backend-config=backend.hcl`. The small
+bootstrap state file is kept safe locally. Optionally, add a backend block to
+`bootstrap/` afterwards and run `terraform init -migrate-state` to move its own
+state into the bucket it created, under the key `bootstrap/terraform.tfstate`.
+
+### Cross-account state access design
+
+The state bucket lives in **Account A**. The `account-b` backend authenticates with
+an Account A profile (`profile = "account-a"` in `backend.hcl`), while its **provider**
+uses Account B credentials. This means no cross-account bucket policy is needed,
+Account B principals can't read Account A's state, and the aws/s3 KMS key isn't
+used across accounts (which would not work).
+
+### terraform init vs -migrate-state vs -reconfigure
+
+| Command | Use when | What happens to existing state |
+|---|---|---|
+| `terraform init -backend-config=backend.hcl` | First init of a working directory, or after cloning. Also after adding a module or provider. | Nothing to move. Connects to the backend. If it detects a backend change it stops and asks you to choose one of the two below. |
+| `terraform init -backend-config=backend.hcl -migrate-state` | You **had** state somewhere (local, or an old bucket/key) and want to **move** it to the new backend. For example, Task 1 was applied with local state and now moves to S3. | **Copies** the state from the old backend to the new one (asks for confirmation). The old copy is left in place, so back it up and then delete it. |
+| `terraform init -backend-config=backend.hcl -reconfigure` | Backend settings changed but you do **not** want to move state: the new location already has the correct state, or a fresh clone/CI runner has stale `.terraform/` metadata. | Ignores the previously cached backend configuration and uses the new one. **No state is copied.** Using it by mistake when you meant to migrate makes Terraform see an empty state and plan to create everything again. |
+| `terraform init -backend=false` | Local validation and CI (this repo). | Skips the backend completely. Never reads or writes state. |
+
+### Implemented vs informational locking
+
+| Locking approach | Status |
+|---|---|
+| **S3 backend + DynamoDB `LockID` table** | **IMPLEMENTED, required by the assignment** |
+| Native S3 locking (`use_lockfile`) | **INFORMATIONAL ONLY**, not a replacement for the assignment requirement |
+
+For context only: Terraform **1.10** added native S3 locking (`use_lockfile = true`),
+which writes a `.tflock` object next to the state using S3 conditional writes.
+Terraform **1.11** deprecated the `dynamodb_table` argument in favor of it. This
+repository implements the **DynamoDB lock table exactly as the assignment
+requires**. That is also the only S3-backend locking in the pinned minimum,
+Terraform 1.5. A future migration, outside the assignment's scope, would add
+`use_lockfile = true` alongside `dynamodb_table` for a transition period (both locks
+taken), then remove the table.
+
+### What the local POC does and does not prove
+
+```
+LOCAL POC
+Terraform refused a competing local-state writer.        PASS
+
+REAL AWS POC
+S3 remote state actually created.                        PENDING
+DynamoDB state locking actually exercised.               PENDING
+Two concurrent Terraform operations tested against AWS.  PENDING
+```
+
+The local lock demo uses the **local** backend. It shows the general Terraform
+behavior (a second writer is refused while the first holds the state lock), but it
+does **not** prove S3 remote state or DynamoDB locking.
+
+On Windows, the local backend's byte-range file lock also makes the competing process
+fail immediately with a file read error instead of retrying, so `-lock-timeout`
+waiting can't be shown locally. With DynamoDB, Terraform retries the conditional
+`PutItem` until `-lock-timeout` expires. That is test R6 in `tests/task2-test.md`.

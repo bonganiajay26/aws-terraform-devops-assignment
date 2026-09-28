@@ -32,6 +32,10 @@ terraform.tfvars.json
 *.auto.tfvars
 *.auto.tfvars.json
 
+# Backend partial configuration (real bucket name / account / profile).
+# Only backend.hcl.example is committed.
+backend.hcl
+
 # Local override files.
 override.tf
 override.tf.json

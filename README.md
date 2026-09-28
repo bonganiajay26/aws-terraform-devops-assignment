@@ -14,7 +14,7 @@ locking, multi-account IAM, a least-privilege CI policy and a trust-policy bug f
 |---|---|---|
 | 0 | Repository bootstrap, guardrails, safe CI | Done (local) |
 | 1 | Five EC2 instances from one `map(object)` + `for_each`, `prevent_destroy` | Done (local POC); real-AWS POC pending |
-| 2 | S3 remote state + DynamoDB locking (bootstrap stack) | Planned |
+| 2 | S3 remote state + DynamoDB locking (bootstrap stack) | Done (local POC); real-AWS POC pending |
 | 3 | Multi-account IAM: groups, users, roleA, roleB, roleC | Planned |
 | 4 | CI least-privilege policy (ECR / ECS / S3 read) | Planned |
 | 5 | Find and fix the roleC trust and S3 policy bugs | Planned |
@@ -164,7 +164,87 @@ are in `tests/task1-test.md`.
 
 ## 7. Task 2 - Remote state and locking
 
-_Implemented in Task 2._
+**Files:** `bootstrap/{main,outputs,variables}.tf`, `account-a/backend.tf`,
+`account-b/backend.tf`, `*/backend.hcl.example`.
+
+### Why remote state
+
+With local state, every engineer has a private copy of the truth. That leads to
+duplicate resources, overwritten changes, orphans, and no protection against two
+applies at once. See NOTES.md Q2/Q3.
+
+```mermaid
+flowchart LR
+    subgraph before["Local state (problem)"]
+        A1[Engineer A<br/>tfstate copy A] --> AWS1[(AWS)]
+        B1[Engineer B<br/>tfstate copy B] --> AWS1
+    end
+    subgraph after["Remote state + locking"]
+        A2[Engineer A] --> L{{"DynamoDB lock<br/>LockID = bucket/key"}}
+        B2[Engineer B / CI] --> L
+        L --> S3[("S3 state bucket<br/>versioned, encrypted, private")]
+        S3 --> AWS2[(AWS)]
+    end
+```
+
+### Bootstrap (chicken-and-egg)
+
+`bootstrap/` runs **once with local state** and creates the backend:
+
+| Resource | Hardening |
+|---|---|
+| S3 bucket `<project>-tfstate-<account>` | versioning, SSE (AES256 or KMS), 4x public access block, ACLs disabled, TLS-only policy, old versions kept 90 days (newest 10 always), `force_destroy = false`, `prevent_destroy` |
+| DynamoDB `<project>-tf-locks` | hash key `LockID` (S), on-demand billing, PITR, SSE, deletion protection, `prevent_destroy` |
+
+### Backend configuration
+
+Backend blocks can't use variables, so each stack uses a **partial configuration**:
+
+| | `backend.tf` (committed) | `backend.hcl` (git-ignored, from `.example`) |
+|---|---|---|
+| account-a | `key = "account-a/terraform.tfstate"`, `encrypt = true` | bucket, region, dynamodb_table, profile |
+| account-b | `key = "account-b/terraform.tfstate"`, `encrypt = true` | same bucket/table, `profile = "account-a"` |
+
+Both stacks share one bucket and one table but use **different keys**, which gives
+separate state files and separate lock items. The bucket is in Account A, so the
+account-b *backend* uses Account A credentials while its *provider* uses Account B.
+
+### init modes
+
+| Command | When |
+|---|---|
+| `terraform init -backend-config=backend.hcl` | first init / fresh clone |
+| `... -migrate-state` | move existing (e.g. local) state into S3 |
+| `... -reconfigure` | backend settings changed, state must NOT be copied |
+| `terraform init -backend=false` | local validation and CI (never touches S3) |
+
+For information only: Terraform 1.10+ also offers native S3 locking
+(`use_lockfile`), and 1.11 deprecated `dynamodb_table`. This repo implements the
+**DynamoDB `LockID` table** that the assignment requires. Notes on a later
+migration are in NOTES.md.
+
+### Local POC
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\task2-local-poc.ps1
+```
+
+This covers an offline plan of `bootstrap/` with 14 hardening assertions, the KMS
+toggle, negative inputs, backend key and config consistency, a check that `init`
+without credentials can't silently fall back to local state, and a local-backend
+demo in which Terraform refuses a competing local-state writer.
+
+The local demo does **not** prove DynamoDB locking. These stay **REAL AWS POC: PENDING**
+(`tests/task2-test.md`):
+
+- S3 remote state actually created
+- DynamoDB state locking actually exercised
+- two concurrent Terraform operations tested against AWS
+
+| Locking approach | Status in this repo |
+|---|---|
+| S3 backend + DynamoDB `LockID` table | **Implemented, required by the assignment** |
+| Native S3 locking (`use_lockfile`, Terraform 1.10+) | Informational only, not a replacement for the assignment requirement |
 
 ## 8. Task 3 - Multi-account IAM
 
@@ -188,7 +268,14 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 ## 12. AWS setup
 
-_Documented in Tasks 2-3 (real-AWS phase)._
+Order matters (details in `tests/task2-test.md`):
+
+1. CLI profiles `account-a` and `account-b` (IAM Identity Center: `aws configure sso --profile account-a`).
+2. `bootstrap/`: copy `terraform.tfvars.example` to `terraform.tfvars`, set the real account ID, then
+   `$env:AWS_PROFILE='account-a'; terraform init; terraform apply` (local state).
+3. `account-a/` and `account-b/`: copy `backend.hcl.example` to `backend.hcl` (values from
+   `terraform -chdir=bootstrap output backend_hcl`), then `terraform init -backend-config=backend.hcl`.
+4. Apply the stacks (Tasks 1, 3, 4).
 
 ## 13. Terraform commands
 
@@ -197,7 +284,12 @@ _Documented in Tasks 2-3 (real-AWS phase)._
 | `terraform fmt -check -recursive` | Formatting gate | No |
 | `terraform init -backend=false` | Download providers, skip backend | No (internet only) |
 | `terraform validate` | Syntax and type checks | No |
+| `terraform init -backend-config=backend.hcl` | Connect to the S3 backend | Yes |
+| `terraform init -backend-config=backend.hcl -migrate-state` | Move existing state into S3 | Yes |
+| `terraform init -backend-config=backend.hcl -reconfigure` | Switch backend config without copying state | Yes |
 | `terraform plan` / `apply` | Real deployment | Yes |
+| `terraform plan -lock-timeout=120s` | Wait for another operation's DynamoDB lock instead of failing | Yes |
+| `terraform force-unlock <ID>` | Release a stale lock (holder confirmed dead) | Yes |
 
 ## 14. Testing
 
@@ -209,12 +301,17 @@ See [docs/testing.md](docs/testing.md) and [tests/](tests/).
 - No AWS credentials are stored in GitHub; future CI/CD uses GitHub OIDC.
 - `allowed_account_ids` pins each stack to its intended account.
 - CI never runs `plan` or `apply`.
+- Remote state is encrypted, versioned, private, TLS-only, locked with DynamoDB, and protected from deletion.
+- Real `backend.hcl` (bucket name / account ID / profile) is git-ignored like `terraform.tfvars`.
 
 ## 16. Cleanup
 
 - **Task 1:** web03 cannot be destroyed by `terraform destroy` (by design). Move it to
   the standard group with a `moved` block + `protected = false`, apply, then destroy.
   Full procedure: `tests/task1-test.md` section 3.
+- **Task 2:** destroy the state backend LAST, after every stack using it. It is protected
+  three ways (prevent_destroy, deletion protection, `force_destroy = false`). Procedure:
+  `tests/task2-test.md` section 3.
 
 ## 17. Troubleshooting
 

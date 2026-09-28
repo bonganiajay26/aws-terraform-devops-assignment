@@ -6,3 +6,14 @@ state_account_id = "000000000000"
 project_name     = "aws-terraform-devops-assignment"
 environment      = "dev"
 owner            = "platform-team"
+
+# ------------------------ Task 2 - remote state -------------------------
+# Defaults (leave commented unless you need different names):
+#   state_bucket_name = "aws-terraform-devops-assignment-tfstate-<state_account_id>"
+#   lock_table_name   = "aws-terraform-devops-assignment-tf-locks"
+# S3 bucket names are GLOBAL - if the default is taken, set a unique name here
+# and use the same value in account-a/backend.hcl and account-b/backend.hcl.
+# state_bucket_name                 = "my-unique-tfstate-bucket"
+# lock_table_name                   = "aws-terraform-devops-assignment-tf-locks"
+# kms_key_arn                       = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000"
+# noncurrent_version_retention_days = 90

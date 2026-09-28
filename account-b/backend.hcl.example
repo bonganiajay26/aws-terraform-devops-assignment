@@ -1,0 +1,14 @@
+# Copy to backend.hcl (git-ignored) and use the values from:
+#   terraform -chdir=bootstrap output backend_hcl
+#
+#   Copy-Item backend.hcl.example backend.hcl
+#   terraform init -backend-config=backend.hcl
+
+bucket         = "aws-terraform-devops-assignment-tfstate-000000000000"
+region         = "us-east-1"
+dynamodb_table = "aws-terraform-devops-assignment-tf-locks"
+
+# The state bucket is in ACCOUNT A, so the backend authenticates with an
+# Account A profile. The aws provider (resources) uses Account B credentials,
+# e.g. $env:AWS_PROFILE = "account-b". No cross-account bucket policy needed.
+profile = "account-a"

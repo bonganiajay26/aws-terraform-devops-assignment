@@ -26,10 +26,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\task1-local-poc.ps1
 | L8 | Negative inputs | 7 fixtures in `tests/fixtures/task1/` | each rejected with its specific validation message |
 | L9 | prevent_destroy mechanism | `tests/task1-prevent-destroy-demo` (terraform_data, TEMP state) | unprotected removal = destroy planned; protected removal and `terraform destroy` = `Instance cannot be destroyed` |
 
-**Offline plan:** the script temporarily writes `account-a/offline_override.tf`
-(git-ignored by `*_override.tf`, deleted in `finally`) with mock credentials and
-`skip_*` flags, so `terraform plan` runs with zero AWS API calls. This proves the
-Terraform logic. It does NOT prove AWS accepts the values.
+**Offline plan:** `scripts/OfflineWorkspace.psm1` copies `account-a` and `modules/`
+into a TEMP folder, removes `backend.tf`, and adds an `offline_override.tf` there with
+mock credentials and `skip_*` flags. It then initialises from the repo's already
+downloaded providers (`-plugin-dir`), so `terraform plan` runs with zero AWS API calls
+and nothing is ever written inside the repository. The TEMP folder is deleted at the
+end. This proves the Terraform logic. It does NOT prove AWS accepts the values.
 
 **prevent_destroy demo:** uses `terraform_data` because testing against real EC2
 state needs an AWS account. The lifecycle mechanism is identical; EC2-specific

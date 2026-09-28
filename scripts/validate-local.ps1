@@ -41,7 +41,12 @@ $requiredFiles = @(
     # Task 1
     'modules/ec2/versions.tf', 'modules/ec2/main.tf', 'modules/ec2/variables.tf', 'modules/ec2/outputs.tf',
     'account-a/ec2.tf', 'account-a/outputs.tf', 'scripts/task1-local-poc.ps1', 'tests/task1-test.md',
-    'tests/task1-prevent-destroy-demo/main.tf'
+    'tests/task1-prevent-destroy-demo/main.tf', 'scripts/OfflineWorkspace.psm1',
+    # Task 2
+    'bootstrap/main.tf', 'bootstrap/outputs.tf',
+    'account-a/backend.tf', 'account-a/backend.hcl.example',
+    'account-b/backend.tf', 'account-b/backend.hcl.example',
+    'scripts/task2-local-poc.ps1', 'tests/task2-test.md', 'tests/task2-lock-demo/main.tf'
 )
 
 function Write-Step {
