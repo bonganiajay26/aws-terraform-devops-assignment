@@ -52,3 +52,44 @@ variable "owner" {
     error_message = "owner must not be empty."
   }
 }
+
+# ----------------------------- Task 1 - EC2 -----------------------------
+
+variable "ami_id" {
+  description = "AMI ID for all instances. Region-specific - no default on purpose. Must be x86_64 because all instance types are t3."
+  type        = string
+}
+
+variable "instances" {
+  description = "ONE map driving all EC2 instances (for_each). Field rules are validated in modules/ec2/variables.tf."
+  type = map(object({
+    instance_type          = string
+    root_volume_type       = string
+    root_volume_size       = number
+    root_volume_iops       = optional(number)
+    root_volume_throughput = optional(number)
+    key_name               = string
+    protected              = optional(bool, false)
+    environment            = optional(string)
+    owner                  = optional(string)
+    tags                   = optional(map(string), {})
+  }))
+
+  # Assignment requirement: at least one critical instance must be protected.
+  validation {
+    condition     = length([for name, cfg in var.instances : name if cfg.protected]) >= 1
+    error_message = "At least one instance must set protected = true (assignment: protect the critical instance)."
+  }
+}
+
+variable "subnet_id" {
+  description = "Subnet for the instances. null = default subnet of the default VPC."
+  type        = string
+  default     = null
+}
+
+variable "vpc_security_group_ids" {
+  description = "Security group IDs for the instances. Empty = VPC default security group."
+  type        = list(string)
+  default     = []
+}

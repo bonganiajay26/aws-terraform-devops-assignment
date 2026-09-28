@@ -37,7 +37,11 @@ $requiredFiles = @(
     'bootstrap/versions.tf', 'bootstrap/providers.tf', 'bootstrap/variables.tf', 'bootstrap/terraform.tfvars.example',
     'account-a/versions.tf', 'account-a/providers.tf', 'account-a/variables.tf', 'account-a/terraform.tfvars.example',
     'account-b/versions.tf', 'account-b/providers.tf', 'account-b/variables.tf', 'account-b/terraform.tfvars.example',
-    '.github/workflows/terraform-validate.yml', 'scripts/validate-local.ps1', 'tests/task0-test.md'
+    '.github/workflows/terraform-validate.yml', 'scripts/validate-local.ps1', 'tests/task0-test.md',
+    # Task 1
+    'modules/ec2/versions.tf', 'modules/ec2/main.tf', 'modules/ec2/variables.tf', 'modules/ec2/outputs.tf',
+    'account-a/ec2.tf', 'account-a/outputs.tf', 'scripts/task1-local-poc.ps1', 'tests/task1-test.md',
+    'tests/task1-prevent-destroy-demo/main.tf'
 )
 
 function Write-Step {

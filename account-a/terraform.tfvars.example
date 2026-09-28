@@ -6,3 +6,61 @@ account_a_id = "000000000000"
 project_name = "aws-terraform-devops-assignment"
 environment  = "dev"
 owner        = "platform-team"
+
+# ----------------------------- Task 1 - EC2 -----------------------------
+# Placeholder AMI (valid format, does not exist). Replace with a real x86_64
+# AMI from YOUR region, e.g. latest Amazon Linux 2023:
+#   aws ssm get-parameter --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 --query Parameter.Value --output text
+ami_id = "ami-0123456789abcdef0"
+
+# subnet_id              = "subnet-0123456789abcdef0"   # default: default VPC subnet
+# vpc_security_group_ids = ["sg-0123456789abcdef0"]     # default: VPC default SG
+
+# ONE variable -> five differently configured instances (for_each).
+# Key pairs must already exist in the region (see tests/task1-test.md).
+instances = {
+  web01 = {
+    instance_type    = "t3.micro"
+    root_volume_type = "gp3"
+    root_volume_size = 20
+    key_name         = "web01-key"
+  }
+
+  web02 = {
+    instance_type    = "t3.small"
+    root_volume_type = "gp2"
+    root_volume_size = 30
+    key_name         = "web02-key"
+  }
+
+  # Critical production instance: io2 + prevent_destroy + termination protection.
+  # io2 limit check: 3000 IOPS <= 1000 IOPS/GiB * 50 GiB = 50000. Valid.
+  web03 = {
+    instance_type    = "t3.medium"
+    root_volume_type = "io2"
+    root_volume_size = 50
+    root_volume_iops = 3000
+    key_name         = "web03-key"
+    environment      = "prod"
+    protected        = true
+  }
+
+  # gp3 with provisioned performance: 6000 IOPS <= 500 * 80 = 40000; 250 MiB/s <= 6000/4 = 1500. Valid.
+  web04 = {
+    instance_type          = "t3.large"
+    root_volume_type       = "gp3"
+    root_volume_size       = 80
+    root_volume_iops       = 6000
+    root_volume_throughput = 250
+    key_name               = "web04-key"
+  }
+
+  # io1: 4000 IOPS <= 50 IOPS/GiB * 100 GiB = 5000. Valid.
+  web05 = {
+    instance_type    = "t3.xlarge"
+    root_volume_type = "io1"
+    root_volume_size = 100
+    root_volume_iops = 4000
+    key_name         = "web05-key"
+  }
+}
