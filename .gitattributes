@@ -1,0 +1,15 @@
+# Force LF line endings so `terraform fmt -check` behaves identically on
+# Windows, Linux (GitHub Actions) and macOS.
+* text=auto eol=lf
+
+*.tf      text eol=lf
+*.tfvars  text eol=lf
+*.hcl     text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.ps1     text eol=lf
+
+*.png     binary
+*.jpg     binary

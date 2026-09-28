@@ -1,0 +1,99 @@
+name: terraform-validate
+
+# SAFE checks only: no AWS credentials, no plan, no apply.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VERSION: "~1.5.0"
+
+jobs:
+  secret-hygiene:
+    name: Secret and state hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fail if forbidden files are tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          pattern='(^|/)\.terraform/|\.tfstate($|\.)|\.tfplan$|(^|/)terraform\.tfvars(\.json)?$|\.pem$|\.key$|(^|/)\.env$'
+          if git ls-files | grep -E "$pattern"; then
+            echo "::error::Forbidden files are tracked (state, tfvars, keys or .terraform)."
+            exit 1
+          fi
+          echo "No forbidden files are tracked."
+
+      - name: Fail if AWS access key IDs or private keys are committed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nE '(AKIA|ASIA)[0-9A-Z]{16}' -- .; then
+            echo "::error::Possible AWS access key ID committed."
+            exit 1
+          fi
+          if git grep -nE 'BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY' -- .; then
+            echo "::error::Private key material committed."
+            exit 1
+          fi
+          echo "No credential patterns found."
+
+  fmt:
+    name: terraform fmt
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt -check -recursive
+        run: terraform fmt -check -recursive -diff
+
+  validate:
+    name: terraform validate (${{ matrix.stack }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack:
+          - bootstrap
+          - account-a
+          - account-b
+    defaults:
+      run:
+        working-directory: ${{ matrix.stack }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform init (no backend, no AWS credentials)
+        run: terraform init -backend=false -input=false -no-color
+
+      - name: terraform validate
+        run: terraform validate -no-color

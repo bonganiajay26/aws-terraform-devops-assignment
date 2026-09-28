@@ -1,0 +1,68 @@
+# =====================================================================
+# aws-terraform-devops-assignment - .gitignore
+# Nothing that is state, secret, machine-specific or generated may
+# ever reach Git.
+# =====================================================================
+
+# Terraform working directories (provider binaries, module cache,
+# backend metadata). Re-created by `terraform init`.
+.terraform/
+**/.terraform/*
+
+# Terraform state - resource IDs, IPs and frequently SECRETS in plain
+# text. State lives in the S3 backend (Task 2), never in Git.
+*.tfstate
+*.tfstate.*
+
+# Saved plans - embed variable values and state.
+*.tfplan
+*.tfplan.json
+tfplan
+plan.out
+
+# Crash logs - may contain sensitive request/response data.
+crash.log
+crash.*.log
+
+# Variable files - real values stay local. Only *.tfvars.example is committed.
+terraform.tfvars
+terraform.tfvars.json
+*.tfvars
+*.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Local override files.
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform CLI configuration (may contain registry/cloud tokens).
+.terraformrc
+terraform.rc
+
+# Keys, certificates and credentials.
+*.pem
+*.key
+*.ppk
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.env
+.env.*
+.aws/
+aws-credentials*
+*credentials.csv
+*accessKeys.csv
+
+# OS / editor noise.
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

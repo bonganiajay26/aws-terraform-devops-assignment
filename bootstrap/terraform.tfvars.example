@@ -1,0 +1,8 @@
+# Copy to terraform.tfvars (git-ignored) and replace with real values.
+#   Copy-Item terraform.tfvars.example terraform.tfvars
+
+aws_region       = "us-east-1"
+state_account_id = "000000000000"
+project_name     = "aws-terraform-devops-assignment"
+environment      = "dev"
+owner            = "platform-team"
