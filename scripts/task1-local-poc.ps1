@@ -230,13 +230,17 @@ try {
     $results['prevent_destroy blocks protected destroy'] = $demoOk
 }
 finally {
-    Remove-TempWorkspace -Path $tempRoot
+    $cleanupOk = Remove-TempWorkspace -Path $tempRoot
 }
 
 # ----------------------------------------------------------------------
 Write-Host ''
 Write-Host '==================== TASK 1 LOCAL POC SUMMARY ====================' -ForegroundColor Cyan
 $allPassed = $true
+if (-not $cleanupOk) {
+    $allPassed = $false
+    Write-Host ('{0,-56} {1}' -f 'TEMP workspace cleanup', 'FAIL') -ForegroundColor Red
+}
 foreach ($name in $results.Keys) {
     $passed = [bool]$results[$name]
     if (-not $passed) { $allPassed = $false }

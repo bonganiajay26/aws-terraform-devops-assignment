@@ -288,13 +288,17 @@ try {
 }
 finally {
     foreach ($v in $awsVars) { [Environment]::SetEnvironmentVariable($v, $savedEnv[$v], 'Process') }
-    Remove-TempWorkspace -Path $tempRoot
+    $cleanupOk = Remove-TempWorkspace -Path $tempRoot
 }
 
 # ----------------------------------------------------------------------
 Write-Host ''
 Write-Host '==================== TASK 2 LOCAL POC SUMMARY ====================' -ForegroundColor Cyan
 $allPassed = $true
+if (-not $cleanupOk) {
+    $allPassed = $false
+    Write-Host ('{0,-56} {1}' -f 'TEMP workspace cleanup', 'FAIL') -ForegroundColor Red
+}
 foreach ($name in $results.Keys) {
     $passed = [bool]$results[$name]
     if (-not $passed) { $allPassed = $false }

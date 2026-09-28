@@ -36,6 +36,9 @@ terraform.tfvars.json
 # Only backend.hcl.example is committed.
 backend.hcl
 
+# Generated raw POC logs (scripts/run-regression.ps1) - regenerated on every run.
+tests/evidence/local/
+
 # Local override files.
 override.tf
 override.tf.json

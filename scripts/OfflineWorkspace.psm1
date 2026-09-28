@@ -75,16 +75,39 @@ function Get-RepoPluginDir {
 }
 
 function Remove-TempWorkspace {
-    # Windows can keep the provider .exe locked for a moment after terraform exits;
-    # retry instead of silently leaving hundreds of MB behind in %TEMP%.
+    <#
+    Deletes a POC TEMP workspace. Windows can retain a file lock on the copied AWS
+    provider binary (876,995,208 bytes, ~836 MiB) for a while after terraform exits; the locking
+    process has not been identified (antivirus/indexing/scanning are possibilities).
+
+    Semantics (strict):
+      deleted on first attempt           -> $true
+      locked, deleted during retries     -> $true, reports the attempt count
+      still present after retry budget   -> $false and a "[FAIL] Could not fully
+                                            remove temporary workspace" line; the
+                                            path is left in place for diagnosis
+    Backoff is only applied after a failed attempt: 1,1,2,2,4,5,5,10,10,10 s
+    (max ~50 s), so a normal cleanup stays immediate.
+    #>
     param([Parameter(Mandatory = $true)][string]$Path)
-    for ($attempt = 1; $attempt -le 10; $attempt++) {
-        if (-not (Test-Path $Path)) { return }
-        Remove-Item -Recurse -Force $Path -ErrorAction SilentlyContinue
-        if (-not (Test-Path $Path)) { return }
-        Start-Sleep -Seconds 1
+    $delays = @(1, 1, 2, 2, 4, 5, 5, 10, 10, 10)
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        if (Test-Path $Path) {
+            Remove-Item -Recurse -Force $Path -ErrorAction SilentlyContinue
+        }
+        if (-not (Test-Path $Path)) {
+            if ($attempt -gt 1) {
+                Write-Host "  [info] TEMP workspace removed after $attempt attempts (file lock released): $Path" -ForegroundColor Yellow
+            }
+            return $true
+        }
+        if ($attempt -gt $delays.Count) { break }
+        Start-Sleep -Seconds $delays[$attempt - 1]
     }
-    Write-Warning "Could not fully remove $Path (file still locked). Delete it manually."
+    Write-Host "  [FAIL] Could not fully remove temporary workspace after $attempt attempts: $Path" -ForegroundColor Red
+    return $false
 }
 
 Export-ModuleMember -Function Invoke-Terraform, New-OfflineWorkspace, Get-RepoPluginDir, Remove-TempWorkspace

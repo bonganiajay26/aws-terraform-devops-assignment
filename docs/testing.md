@@ -63,6 +63,40 @@ from `account-a/ci-policy.tf`. POC-4 compares both in an order-independent form
 mutation-tested: an added action, a widened resource or a changed condition each
 make it fail.
 
+### Bug fixtures (Task 5)
+
+`tests/fixtures/task5/` holds the original **broken** roleC policies
+(`user/roleB` trust, `s3:*` on `*`) as test data only, plus **fixed** copies.
+POC-5 evaluates both with the IAM model, asserts that no deployable `.tf`
+references the fixtures or contains either broken pattern, and asserts that the
+fixed copies match the Terraform-rendered roleC policies (Terraform is the source
+of truth).
+
+### Full local regression
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-regression.ps1
+```
+
+`scripts/run-regression.ps1` runs the repository gates (fmt, validate x3,
+validate-local, `git diff --check`) and POC-1..POC-5 sequentially, never
+concurrently. For each POC it:
+
+1. saves the raw output to `tests/evidence/local/pocN-latest.log` (git-ignored)
+   **before** interpreting it;
+2. applies a case-sensitive failure matcher
+   (`[FAIL]`, a line ending in ` FAIL`, `Could not fully remove`, `ERROR:`) and prints
+   every matched line with its log line number. Expected `Error:` lines from
+   negative tests are counted separately and are not failures;
+3. snapshots POC workspace folders (`%TEMP%\task<N>-poc-*`) before and after and
+   fails if the POC left any of its own workspaces behind. Unrelated `%TEMP%`
+   content is ignored.
+
+TEMP cleanup is strict: `Remove-TempWorkspace` retries with bounded backoff
+(about 50 s at most) because Windows can keep a file lock on the copied provider
+binary (876,995,208 bytes, ~836 MiB). The locking process has not been identified. A workspace that survives
+the retry budget is reported as `[FAIL]`, and the POC exits non-zero.
+
 ## Phase 2 - REAL AWS POC VALIDATION (when accounts exist)
 
 `terraform plan` / `apply`, AWS CLI verification, positive and negative access tests.

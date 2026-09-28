@@ -17,7 +17,7 @@ locking, multi-account IAM, a least-privilege CI policy and a trust-policy bug f
 | 2 | S3 remote state + DynamoDB locking (bootstrap stack) | Done (local POC); real-AWS POC pending |
 | 3 | Multi-account IAM: groups, users, roleA, roleB, roleC | Done (local POC); real-AWS POC pending |
 | 4 | CI least-privilege policy (ECR / ECS / S3 read) | Done (local POC); real-AWS POC pending |
-| 5 | Find and fix the roleC trust and S3 policy bugs | Planned |
+| 5 | Find and fix the roleC trust and S3 policy bugs | Done (local POC); real-AWS POC pending |
 
 ## 2. Assignment requirements
 
@@ -345,7 +345,40 @@ rejected. **Real ECR push / ECS deploy / PassRole / S3 read: REAL AWS POC PENDIN
 
 ## 10. Task 5 - Bug fix
 
-_Implemented in Task 5._
+**Files:** `tests/fixtures/task5/` (broken and fixed policies, **test data only**),
+`scripts/task5-local-poc.ps1`, `tests/task5-test.md`. The deployable fix is the
+Task 3 code in `account-b/role-c.tf`, which is not changed by Task 5.
+
+| Bug | Broken (original) | Fixed (deployed) | Effect of the bug |
+|---|---|---|---|
+| 1 - wrong principal type | `arn:aws:iam::000000000000:user/roleB` | `arn:aws:iam::000000000000:role/roleB` | roleB is a **role**, but the principal ARN identifies a **user**. It is the wrong principal for the intended trust, so roleB -> roleC is denied |
+| 2 - over-permission | `s3:*` on `Resource "*"` | `s3:*` on `arn:aws:s3:::BUCKET` + `arn:aws:s3:::BUCKET/*` | roleC could read, write, delete and re-policy **every** bucket instead of one |
+
+```mermaid
+flowchart LR
+    RB[roleB] -->|"sts:AssumeRole"| T{"roleC trust"}
+    T -->|"BROKEN: user/roleB"| X[DENIED]
+    T -->|"FIXED: role/roleB"| RC[roleC]
+    RC -->|"BROKEN: s3:* on *"| ALL[("every bucket")]
+    RC -->|"FIXED: bucket + bucket/*"| TB[("target bucket only")]
+```
+
+### Local POC
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\task5-local-poc.ps1
+```
+
+This proves four things, using the simplified IAM model (POC model only):
+1. The broken trust denies the real roleB (identity=Allow, trust=Deny).
+2. The broken S3 policy is over-broad.
+3. The fixed fixtures and the deployed Terraform produce the intended matrix
+   (target bucket and objects allowed, unrelated bucket and objects denied).
+4. Deployable Terraform contains neither broken pattern, never references the
+   fixtures, and the fixed fixtures match the rendered policies.
+
+**Real-AWS before/after tests: PENDING** (`tests/task5-test.md`, run against a
+disposable `roleC-bugtest` role, never the real roleC).
 
 ## 11. Local setup
 
@@ -382,7 +415,15 @@ Order matters (details in `tests/task2-test.md`):
 
 ## 14. Testing
 
-See [docs/testing.md](docs/testing.md) and [tests/](tests/).
+Full local regression (repository gates and POC-1..POC-5, with raw logs in
+`tests/evidence/local/`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-regression.ps1
+```
+
+Details are in [docs/testing.md](docs/testing.md) and per-task procedures in [tests/](tests/).
+Every task has a **LOCAL POC (PASS)** and a **REAL AWS POC (PENDING)**.
 
 ## 15. Security considerations
 

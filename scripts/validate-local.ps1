@@ -53,7 +53,13 @@ $requiredFiles = @(
     'scripts/IamPolicyModel.psm1', 'scripts/task3-local-poc.ps1', 'tests/task3-test.md',
     # Task 4
     'account-a/ci-policy.tf', 'policies/ci-policy.json', 'policies/README.md',
-    'scripts/task4-local-poc.ps1', 'tests/task4-test.md'
+    'scripts/task4-local-poc.ps1', 'tests/task4-test.md',
+    # Task 5
+    'tests/fixtures/task5/broken-trust-policy.json', 'tests/fixtures/task5/broken-s3-policy.json',
+    'tests/fixtures/task5/fixed-trust-policy.json', 'tests/fixtures/task5/fixed-s3-policy.json',
+    'scripts/task5-local-poc.ps1', 'tests/task5-test.md',
+    # Regression driver
+    'scripts/run-regression.ps1'
 )
 
 function Write-Step {

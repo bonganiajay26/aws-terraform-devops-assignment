@@ -35,7 +35,7 @@
 
 ### Why .terraform/ must not be committed
 
-- It contains provider binaries (the AWS provider is several hundred MB) that are
+- It contains provider binaries (the AWS provider v6.66.0 for Windows is 876,995,208 bytes, ~836 MiB) that are
   platform-specific: a Windows `.exe` is useless on the Linux CI runner, and it
   exceeds GitHub's 100 MB file limit.
 - It contains cached backend configuration (bucket, key, and sometimes values
@@ -55,8 +55,8 @@
 | 6 | Why is trusting Account A root broader than trusting the roleB ARN? | [Answered below](#q6---why-is-trusting-account-a-root-broader-than-trusting-the-roleb-arn) |
 | 7 | What permissions were deliberately excluded from CI? | [Answered below](#q7---what-permissions-were-deliberately-excluded-from-ci) |
 | 8 | Why were those permissions excluded? | [Answered below](#q8---why-were-those-permissions-excluded) |
-| 9 | Why was the original roleC trust policy broken? | Task 5 |
-| 10 | Why was `Resource "*"` wrong for roleC S3 permissions? | Task 5 |
+| 9 | Why was the original roleC trust policy broken? | [Answered below](#q9---why-was-the-original-rolec-trust-policy-broken) |
+| 10 | Why was `Resource "*"` wrong for roleC S3 permissions? | [Answered below](#q10---why-was-resource--wrong-for-rolec-s3-permissions) |
 
 ## Task 1 - Multi-instance EC2
 
@@ -487,3 +487,69 @@ ECR/ECS/IAM/S3 ARNs.
   the CI credential leaks. The production recommendation (Q5) is to replace the
   `ci` IAM user with a **GitHub OIDC role** carrying this same policy, so there is
   no long-lived key to leak in the first place.
+
+## Task 5 - Find and fix the bugs
+
+The corrected policies are the Task 3 Terraform (`account-b/role-c.tf`), which is
+the source of truth. The original, broken versions are kept only as test fixtures
+(`tests/fixtures/task5/broken-*.json`) and are never referenced by deployable code.
+
+### Q9 - Why was the original roleC trust policy broken?
+
+```
+BROKEN  "Principal": {"AWS": "arn:aws:iam::000000000000:user/roleB"}
+FIXED   "Principal": {"AWS": "arn:aws:iam::000000000000:role/roleB"}
+```
+
+The trust policy is broken because `roleB` is an IAM **role**, but the Principal
+ARN identifies `user/roleB`, an IAM **user**. The intended trusted principal is
+`arn:aws:iam::000000000000:role/roleB`. The fixed policy trusts that exact role
+rather than a user principal or the broader Account A root principal.
+
+Why that makes the intended AssumeRole fail:
+
+- When roleB calls `sts:AssumeRole`, the caller is a session of the role roleB.
+  A trust policy entry for `...:user/roleB` names a different principal type and
+  a different identity, so it does not authorize roleB. The trust side of the
+  two-sided check (Task 3) is not satisfied, and the call is denied even though
+  roleB's own identity policy allows it. The local model shows exactly this:
+  `identity=Allow, trust=Deny`.
+- Secondary detail (behavior can vary with principal existence and resolution):
+  IAM validates principals when a trust policy is saved, so the broken policy may
+  be rejected outright as an invalid principal. If a user named `roleB` did exist,
+  the policy would instead trust that user, and roleB would still be locked out.
+  Either way, it is the wrong principal ARN for the intended trust relationship.
+
+### Q10 - Why was `Resource "*"` wrong for roleC S3 permissions?
+
+```
+BROKEN  "Action": "s3:*", "Resource": "*"
+FIXED   "Action": "s3:*", "Resource": ["arn:aws:s3:::BUCKET", "arn:aws:s3:::BUCKET/*"]
+```
+
+The requirement is full access to **one named bucket**. `s3:*` on `"*"` grants
+roleC S3 permissions across all resources rather than restricting access to the
+intended bucket:
+
+- every bucket and object in Account B (read, overwrite, delete, `DeleteBucket`);
+- `PutBucketPolicy` / `PutPublicAccessBlock` on any of them, so roleC could expose
+  or lock out other teams' data;
+- account-level actions such as `ListAllMyBuckets` and `CreateBucket`;
+- buckets in *other* accounts whose bucket policies trust Account B principals.
+
+The local POC shows the broken policy allowing `ListBucket`, `GetObject`,
+`DeleteBucket` and `PutBucketPolicy` on an unrelated bucket. The fixed and deployed
+policies deny all of them while still allowing the target bucket and its objects.
+
+**Why two ARNs, and why they are not interchangeable.** S3 actions apply to
+different resource types:
+
+- bucket-level actions (`s3:ListBucket`, `s3:GetBucketLocation`,
+  `s3:GetBucketVersioning`, `s3:PutBucketPolicy`, `s3:DeleteBucket`) are
+  authorized against `arn:aws:s3:::BUCKET`;
+- object-level actions (`s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`,
+  `s3:GetObjectVersion`) are authorized against `arn:aws:s3:::BUCKET/*`.
+
+`s3:*` on both ARNs grants each action on its **own** resource type. An
+object action is never granted by the bucket ARN, and vice versa. Neither ARN alone
+provides "full access to the bucket", and together they provide nothing beyond it.

@@ -81,3 +81,22 @@
 | `AccessDenied` on `s3 cp` upload / `s3 rm` | Read-only by design | Intended |
 | POC-4 "rendered policy == policies/ci-policy.json" FAIL | Policy changed in `ci-policy.tf` but not in the reference JSON (or vice versa) | Update both; the check is intentional drift protection |
 | POC comparisons print `System.Object[]` / odd booleans | PowerShell: binary `-join` binds looser than `-eq`; nested arrays | The committed script uses `Join-Sorted`; don't inline `-join` inside comparisons |
+
+## Task 5
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `MalformedPolicyDocument: Invalid principal in policy: ...:user/roleB` | BUG 1 - the principal ARN identifies a user, but roleB is a role | Use `arn:aws:iam::<A>:role/roleB` (as in `account-b/role-c.tf`) |
+| roleB gets `AccessDenied ... sts:AssumeRole` on roleC | Trust principal is not the exact roleB **role** ARN | Same fix; compare `role_b_arn` (account-a) with `role_c_trusted_principal` (account-b) |
+| roleC can list or read unrelated buckets | BUG 2 - `Resource "*"` | Scope to `arn:aws:s3:::BUCKET` + `arn:aws:s3:::BUCKET/*` |
+| roleC can `GetObject` but `aws s3 ls s3://BUCKET` fails | Only `BUCKET/*` granted (object ARN) | Also grant the bucket ARN for bucket-level actions |
+| POC-5 "Fixed fixtures match deployable Terraform" FAIL | `role-c.tf` changed but the `fixed-*.json` fixtures were not updated | Update the fixtures; Terraform is the source of truth |
+| POC-5 "Deployable Terraform has no user/roleB" FAIL | `:user/roleB` in a **code** line of a `.tf` file | Remove it (comments that document the bug are ignored by the check) |
+
+## Local regression harness
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `[FAIL] Could not fully remove temporary workspace ...` / `TEMP workspace cleanup FAIL` | Windows kept a file lock on the copied AWS provider binary beyond the ~50 s retry budget (locking process not identified) | Check that no `terraform*` process is running, then delete the reported folder. Rerun; if it recurs, look for the locking process (e.g. Resource Monitor > CPU > Associated Handles) |
+| `realFails=N` in `run-regression.ps1` | A failure marker matched in a POC's raw output | Read the printed matched lines and `tests/evidence/local/pocN-latest.log` at those line numbers |
+| `[info] TEMP workspace removed after N attempts` | A lock was released during the retries | Informational: cleanup succeeded, not a failure |

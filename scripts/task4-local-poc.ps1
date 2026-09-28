@@ -306,7 +306,7 @@ catch {
     Write-Host "  ERROR: $_" -ForegroundColor Red
 }
 finally {
-    Remove-TempWorkspace -Path $tempRoot
+    $cleanupOk = Remove-TempWorkspace -Path $tempRoot
 }
 
 # ----------------------------------------------------------------------
@@ -314,6 +314,10 @@ Write-Host ''
 Write-Host '==================== TASK 4 LOCAL POC SUMMARY ====================' -ForegroundColor Cyan
 $expectedChecks = 8
 $allPassed = ($results.Count -eq $expectedChecks)
+if (-not $cleanupOk) {
+    $allPassed = $false
+    Write-Host ('{0,-56} {1}' -f 'TEMP workspace cleanup', 'FAIL') -ForegroundColor Red
+}
 foreach ($name in $results.Keys) {
     $passed = [bool]$results[$name]
     if (-not $passed) { $allPassed = $false }

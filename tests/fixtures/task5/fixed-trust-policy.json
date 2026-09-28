@@ -1,0 +1,13 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TrustRoleBFromAccountAOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::000000000000:role/roleB"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
