@@ -21,8 +21,11 @@ locking, multi-account IAM, a least-privilege CI policy and a trust-policy bug f
 
 ## 2. Assignment requirements
 
-See [NOTES.md](NOTES.md) for the written answers. `FINAL-CHECKLIST.md` (created at
-the end) maps every requirement to its implementation and evidence.
+See [NOTES.md](NOTES.md) for the written answers and
+[FINAL-CHECKLIST.md](FINAL-CHECKLIST.md) for the audited traceability table (every
+requirement mapped to its file, test and status), the security review, the
+clean-clone regression result, and the final submission gate (LOCAL POC: PASS,
+REAL AWS POC: PENDING).
 
 ## 3. Architecture
 
