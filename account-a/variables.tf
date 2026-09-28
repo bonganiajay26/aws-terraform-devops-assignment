@@ -93,3 +93,48 @@ variable "vpc_security_group_ids" {
   type        = list(string)
   default     = []
 }
+
+# ----------------------------- Task 3 - IAM -----------------------------
+
+variable "account_b_id" {
+  description = "12-digit AWS account ID of Account B (hosts roleC). Used to build the exact roleC ARN for roleB."
+  type        = string
+  default     = "111111111111"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.account_b_id))
+    error_message = "account_b_id must be exactly 12 digits."
+  }
+}
+
+variable "console_user_names" {
+  description = "The two group2 users that get console + CLI access."
+  type        = list(string)
+  default     = ["developer1", "developer2"]
+
+  validation {
+    condition     = length(var.console_user_names) == 2 && length(distinct(var.console_user_names)) == 2
+    error_message = "console_user_names must contain exactly two distinct names (assignment: two console users)."
+  }
+
+  validation {
+    condition     = alltrue([for name in var.console_user_names : can(regex("^[a-zA-Z0-9+=,.@_-]{1,64}$", name))])
+    error_message = "Each console user name must be a valid IAM user name (1-64 chars of letters, digits, +=,.@_-)."
+  }
+
+  validation {
+    condition     = length(setintersection(toset(var.console_user_names), toset(["engine", "ci"]))) == 0
+    error_message = "engine and ci are programmatic-only (group1) and cannot be console users."
+  }
+}
+
+variable "console_pgp_key" {
+  description = "PGP public key (base64) or keybase:<user>. When set, Terraform creates group2 console login profiles and stores ONLY the PGP-encrypted initial password. null (default) = no login profiles in Terraform (no password ever in state); provision console passwords out of band."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.console_pgp_key == null || length(trimspace(coalesce(var.console_pgp_key, " "))) > 0
+    error_message = "console_pgp_key must be null or a non-empty PGP key / keybase:<user> reference."
+  }
+}

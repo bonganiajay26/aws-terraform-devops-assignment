@@ -64,3 +64,15 @@ instances = {
     key_name         = "web05-key"
   }
 }
+
+# ----------------------------- Task 3 - IAM -----------------------------
+# Account B hosts roleC; roleB may assume ONLY arn:aws:iam::<account_b_id>:role/roleC.
+account_b_id = "111111111111"
+
+# group2 (console + CLI). engine and ci (group1) are fixed and programmatic-only.
+console_user_names = ["developer1", "developer2"]
+
+# Console login profiles are created by Terraform ONLY when a PGP key is set
+# (state/outputs then hold only the encrypted password). Leave unset to keep all
+# passwords out of Terraform and provision them out of band (tests/task3-test.md).
+# console_pgp_key = "keybase:your-keybase-user"

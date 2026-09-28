@@ -52,3 +52,33 @@ variable "owner" {
     error_message = "owner must not be empty."
   }
 }
+
+# ----------------------------- Task 3 - IAM -----------------------------
+
+variable "account_a_id" {
+  description = "12-digit AWS account ID of Account A. roleC trusts EXACTLY arn:aws:iam::<account_a_id>:role/roleB."
+  type        = string
+  default     = "000000000000"
+
+  validation {
+    condition     = can(regex("^[0-9]{12}$", var.account_a_id))
+    error_message = "account_a_id must be exactly 12 digits."
+  }
+}
+
+variable "target_bucket_name" {
+  description = "The ONE bucket roleC gets full access to. null = \"<project_name>-crossacct-<account_b_id>\"."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.target_bucket_name == null || can(regex("^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", var.target_bucket_name))
+    error_message = "target_bucket_name must be a valid S3 bucket name: 3-63 lowercase letters, digits, dots, hyphens."
+  }
+}
+
+variable "create_control_bucket" {
+  description = "Create a second, unrelated bucket used only by the negative test (roleC -> other bucket = AccessDenied)."
+  type        = bool
+  default     = true
+}

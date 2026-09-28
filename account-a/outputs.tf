@@ -19,3 +19,44 @@ output "instance_summary" {
   description = "Per-instance type / key pair / root volume configuration."
   value       = module.ec2.instance_summary
 }
+
+# ----------------------------- Task 3 - IAM -----------------------------
+# No access key IDs or secrets are output (none are created by Terraform).
+
+output "iam_group_members" {
+  description = "Members of group1 (programmatic only) and group2 (console + CLI)."
+  value = {
+    group1 = sort(aws_iam_group_membership.group1.users)
+    group2 = sort(aws_iam_group_membership.group2.users)
+  }
+}
+
+output "iam_user_arns" {
+  description = "ARNs of all IAM users."
+  value       = { for name, user in aws_iam_user.this : name => user.arn }
+}
+
+output "console_user_names" {
+  description = "group2 users intended for console + CLI access."
+  value       = sort(var.console_user_names)
+}
+
+output "console_login_profiles_managed_by_terraform" {
+  description = "Users whose console login profile Terraform manages (empty unless console_pgp_key is set)."
+  value       = sort(keys(aws_iam_user_login_profile.console))
+}
+
+output "console_encrypted_passwords" {
+  description = "PGP-ENCRYPTED initial console passwords (only when console_pgp_key is set; decrypt offline). Never plaintext."
+  value       = { for name, profile in aws_iam_user_login_profile.console : name => profile.encrypted_password }
+}
+
+output "role_a_arn" {
+  description = "roleA - admin except IAM."
+  value       = aws_iam_role.role_a.arn
+}
+
+output "role_b_arn" {
+  description = "roleB - may only assume roleC. Must equal the principal trusted by roleC in Account B."
+  value       = aws_iam_role.role_b.arn
+}

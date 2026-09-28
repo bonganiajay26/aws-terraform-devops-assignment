@@ -15,7 +15,7 @@ locking, multi-account IAM, a least-privilege CI policy and a trust-policy bug f
 | 0 | Repository bootstrap, guardrails, safe CI | Done (local) |
 | 1 | Five EC2 instances from one `map(object)` + `for_each`, `prevent_destroy` | Done (local POC); real-AWS POC pending |
 | 2 | S3 remote state + DynamoDB locking (bootstrap stack) | Done (local POC); real-AWS POC pending |
-| 3 | Multi-account IAM: groups, users, roleA, roleB, roleC | Planned |
+| 3 | Multi-account IAM: groups, users, roleA, roleB, roleC | Done (local POC); real-AWS POC pending |
 | 4 | CI least-privilege policy (ECR / ECS / S3 read) | Planned |
 | 5 | Find and fix the roleC trust and S3 policy bugs | Planned |
 
@@ -248,7 +248,55 @@ The local demo does **not** prove DynamoDB locking. These stay **REAL AWS POC: P
 
 ## 8. Task 3 - Multi-account IAM
 
-_Implemented in Task 3._
+**Files:** `account-a/{iam-users-groups,role-a,role-b}.tf`, `account-b/{s3,role-c,outputs}.tf`.
+
+```mermaid
+flowchart LR
+    subgraph A["Account A - 000000000000"]
+        G1["group1<br/>engine, ci<br/>CLI only (no login profile)"]
+        G2["group2<br/>developer1, developer2<br/>console + CLI access model"]
+        RA["roleA<br/>Allow NotAction iam:*<br/>Deny iam:*"]
+        RB["roleB<br/>ONLY sts:AssumeRole<br/>on roleC ARN"]
+        G2 -- "AssumeRole + MFA" --> RA
+        G1 -. "engine only" .-> RB
+    end
+    subgraph B["Account B - 111111111111"]
+        RC["roleC<br/>trust: role/roleB ONLY"]
+        T[("target bucket<br/>bucket + bucket/*")]
+        C[("control bucket<br/>(test only)")]
+        RC -- "s3:*" --> T
+        RC -. "denied" .-> C
+    end
+    RB -- "sts:AssumeRole (two-sided)" --> RC
+```
+
+| Requirement | Implementation |
+|---|---|
+| group1 engine + ci, CLI only | no `aws_iam_user_login_profile`; Terraform creates **no access keys** |
+| group2 two users, console + CLI | `developer1`, `developer2`: permissions for self-service password, access keys and MFA on their own user only, plus roleA with MFA. **Credential provisioning is intentionally kept out of Terraform state.** Login profiles are created only when `console_pgp_key` is set (encrypted password only). Otherwise console passwords and CLI keys are provisioned out of band. |
+| roleA admin except IAM | custom policy `Allow NotAction iam:*` + explicit `Deny iam:*`, **not** AdministratorAccess; MFA-gated for group2 |
+| roleB only `sts:AssumeRole` on roleC | one inline statement, exact ARN `arn:aws:iam::<B>:role/roleC`, nothing else |
+| roleC trusts only roleB | Principal = `arn:aws:iam::<A>:role/roleB` (not `:root`, not `:user/roleB`) |
+| roleC full access to one bucket | `s3:*` on `arn:aws:s3:::BUCKET` **and** `arn:aws:s3:::BUCKET/*`, never `*` |
+| no secrets in outputs or state | no access keys created; no plaintext console password ever in state or outputs (PGP-encrypted only, or not managed by Terraform) |
+
+**Apply order:** account-a first, then account-b. IAM validates that roleC's
+trusted principal (roleB) exists.
+
+### Local POC
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\task3-local-poc.ps1
+```
+
+This runs offline plans of both accounts and structural checks on the **rendered**
+policy JSON (exact principal, no root trust, bucket scoping, roleB minimal, no
+access keys). It then evaluates the assignment's tests A-E with a **simplified IAM
+model** (`scripts/IamPolicyModel.psm1`, which is not AWS), including a
+counterfactual that shows Account A root trust would admit roleA and the root user.
+
+**REAL AWS POC: PENDING.** The actual `engine -> roleB -> AssumeRole -> roleC -> S3`
+calls between two accounts are in `tests/task3-test.md`.
 
 ## 9. Task 4 - CI least-privilege policy
 
@@ -303,12 +351,18 @@ See [docs/testing.md](docs/testing.md) and [tests/](tests/).
 - CI never runs `plan` or `apply`.
 - Remote state is encrypted, versioned, private, TLS-only, locked with DynamoDB, and protected from deletion.
 - Real `backend.hcl` (bucket name / account ID / profile) is git-ignored like `terraform.tfvars`.
+- IAM: no `AdministratorAccess` shortcut, no access keys in Terraform/state, exact-ARN trust
+  policies (never Account A root for roleC), `Resource "*"` only where technically justified
+  (roleA admin role, `iam:GetAccountPasswordPolicy`).
 
 ## 16. Cleanup
 
 - **Task 1:** web03 cannot be destroyed by `terraform destroy` (by design). Move it to
   the standard group with a `moved` block + `protected = false`, apply, then destroy.
   Full procedure: `tests/task1-test.md` section 3.
+- **Task 3:** destroy account-b (roleC, buckets) before account-a (roleB), and delete any
+  access keys created for testing (`tests/task3-test.md`). The target bucket must be
+  emptied first (versioned). The control bucket has `force_destroy`.
 - **Task 2:** destroy the state backend LAST, after every stack using it. It is protected
   three ways (prevent_destroy, deletion protection, `force_destroy = false`). Procedure:
   `tests/task2-test.md` section 3.

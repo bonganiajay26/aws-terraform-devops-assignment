@@ -46,7 +46,11 @@ $requiredFiles = @(
     'bootstrap/main.tf', 'bootstrap/outputs.tf',
     'account-a/backend.tf', 'account-a/backend.hcl.example',
     'account-b/backend.tf', 'account-b/backend.hcl.example',
-    'scripts/task2-local-poc.ps1', 'tests/task2-test.md', 'tests/task2-lock-demo/main.tf'
+    'scripts/task2-local-poc.ps1', 'tests/task2-test.md', 'tests/task2-lock-demo/main.tf',
+    # Task 3
+    'account-a/iam-users-groups.tf', 'account-a/role-a.tf', 'account-a/role-b.tf',
+    'account-b/s3.tf', 'account-b/role-c.tf', 'account-b/outputs.tf',
+    'scripts/IamPolicyModel.psm1', 'scripts/task3-local-poc.ps1', 'tests/task3-test.md'
 )
 
 function Write-Step {

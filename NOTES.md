@@ -50,9 +50,9 @@
 | 1 | Which EC2 instance is protected and why? | [Answered below](#q1---which-ec2-instance-is-protected-and-why) |
 | 2 | What happens with local state when multiple engineers operate on the same infrastructure? | [Answered below](#q2---what-happens-with-local-state-when-multiple-engineers-operate-on-the-same-infrastructure) |
 | 3 | How do S3 remote state and locking help? | [Answered below](#q3---how-do-s3-remote-state-and-locking-help) |
-| 4 | Would engine/ci long-lived access keys be used in real production? | Task 3 |
-| 5 | What should be used instead? | Task 3 |
-| 6 | Why is trusting Account A root broader than trusting the roleB ARN? | Task 3 |
+| 4 | Would engine/ci long-lived access keys be used in real production? | [Answered below](#q4---would-engineci-long-lived-access-keys-be-used-in-real-production) |
+| 5 | What should be used instead? | [Answered below](#q5---what-should-be-used-instead) |
+| 6 | Why is trusting Account A root broader than trusting the roleB ARN? | [Answered below](#q6---why-is-trusting-account-a-root-broader-than-trusting-the-roleb-arn) |
 | 7 | What permissions were deliberately excluded from CI? | Task 4 |
 | 8 | Why were those permissions excluded? | Task 4 |
 | 9 | Why was the original roleC trust policy broken? | Task 5 |
@@ -243,3 +243,157 @@ On Windows, the local backend's byte-range file lock also makes the competing pr
 fail immediately with a file read error instead of retrying, so `-lock-timeout`
 waiting can't be shown locally. With DynamoDB, Terraform retries the conditional
 `PutItem` until `-lock-timeout` expires. That is test R6 in `tests/task2-test.md`.
+
+## Task 3 - Multi-account IAM
+
+### What was built
+
+| Principal | Account | Access | How |
+|---|---|---|---|
+| group1: engine, ci | A | CLI/programmatic only | No `aws_iam_user_login_profile`, so no console password exists. Terraform creates **no access keys**. |
+| group2: developer1, developer2 | A | Console + CLI (access model) | A group policy lets each user manage only **their own** password, access keys and MFA (`user/${aws:username}`), and assume roleA with MFA. The **credentials themselves are not provisioned into Terraform state**: login profiles are created only when `console_pgp_key` is set (encrypted password only, reset required). Otherwise an administrator creates console passwords out of band, and each user creates their own CLI key if one is needed. |
+| roleA | A | Everything except IAM | Custom policy `Allow NotAction iam:*` + `Deny iam:*`. Assumable by developer1/developer2 **with MFA**. |
+| roleB | A | Only `sts:AssumeRole` on `arn:aws:iam::111111111111:role/roleC` | One inline statement, no managed policies. Assumable only by `engine`. |
+| roleC | B | `s3:*` on one bucket | Trust = exactly `arn:aws:iam::000000000000:role/roleB`. Resources = `arn:aws:s3:::BUCKET` and `arn:aws:s3:::BUCKET/*`. |
+
+The assignment doesn't say who may assume roleA and roleB, so the narrowest
+reasonable choice was made. roleA is for humans (group2, MFA required). roleB is
+the cross-account entry point for the `engine` workload. `ci` is deliberately
+**not** allowed to assume roleB; its permissions come in Task 4.
+
+### Security implications of console + CLI users (group2)
+
+- **Two credential types to protect.** A console password (phishing, reuse) and
+  optional access keys (leaks). Mitigations here: reset required at first sign-in,
+  and users can only manage their own credentials.
+- **MFA is enforced where it matters.** The users' own permissions are
+  self-service only. All real work goes through roleA, which requires
+  `aws:MultiFactorAuthPresent = true`. A stolen password or key without MFA can't
+  reach roleA.
+- **Hardening for production** (beyond the assignment): an account password
+  policy, a "deny everything unless MFA" guardrail statement, access key
+  rotation/age alarms, CloudTrail alerts on console sign-ins without MFA, and
+  ideally IAM Identity Center instead of IAM users (see Q5).
+- **No plaintext credential ever reaches Terraform state or outputs.** Without a
+  PGP key, `aws_iam_user_login_profile` would store the generated password in
+  plaintext in state. So Terraform creates login profiles **only** when
+  `console_pgp_key` is set, and then stores only `encrypted_password`. By default,
+  console passwords are provisioned out of band
+  (`aws iam create-login-profile --password-reset-required`), and CLI access keys
+  are created by each user through the self-service policy, never by Terraform.
+- **What the local POC proves:** the permission model (who may do what) and the
+  absence of credentials in state. It deliberately does **not** provision
+  credentials; that part is covered by the real-AWS steps in `tests/task3-test.md`.
+
+### roleA - "Allow *, but deny IAM" and explicit Deny
+
+```json
+{ "Effect": "Allow", "NotAction": "iam:*", "Resource": "*" }
+{ "Effect": "Deny",  "Action":    "iam:*", "Resource": "*" }
+```
+
+- `AdministratorAccess` was **not** used: it includes `iam:*`, and a role that can
+  edit IAM can grant itself anything, so "except IAM" would be meaningless.
+- `Allow NotAction iam:*` grants every action of every service **except** IAM
+  actions. On its own, IAM is just *not allowed* (implicit deny).
+- **Why the explicit Deny too:** in AWS evaluation, an explicit `Deny` in any
+  applicable policy always wins over any `Allow`. If someone later attaches another
+  policy that allows `iam:CreateUser` or `iam:AttachRolePolicy`, the explicit Deny
+  still blocks it. An implicit deny would be overridden by that new Allow.
+- **Tradeoff:** `iam:PassRole` is an IAM action, so roleA can't pass roles
+  (for example, attach an instance profile to EC2 or a role to Lambda). That's a
+  deliberate consequence of "except IAM". If needed, carve out
+  `iam:PassRole` for specific role ARNs with an `iam:PassedToService` condition.
+- **Residual paths to consider in production:** services that manage identities
+  outside IAM (IAM Identity Center `sso:*`, `organizations:*`) are not IAM actions.
+  An SCP or permission boundary should restrict them in a real organization.
+- `Resource "*"` is justified here because this *is* the administrator role.
+
+### Two-sided cross-account AssumeRole
+
+```
+roleB (Account A)  -- sts:AssumeRole -->  roleC (Account B)
+   side 1: roleB IDENTITY policy          side 2: roleC TRUST policy
+   Allow sts:AssumeRole                   Allow sts:AssumeRole
+   Resource = arn:...:111111111111:       Principal = arn:...:000000000000:
+              role/roleC                              role/roleB
+```
+
+Both sides must allow the call:
+
+1. **roleB needs permission to call `sts:AssumeRole`** on roleC's ARN (Account A
+   controls what its principals may do).
+2. **roleC's trust policy must trust roleB** (Account B controls who may enter).
+
+Neither account can grant access alone. The local model shows each side
+separately. roleA passes side 1 (it has `sts:AssumeRole` on `*`) but fails side 2,
+so it is DENIED. `engine` fails both sides.
+
+### Bucket-level vs object-level ARNs
+
+| ARN | Matches | Needed for |
+|---|---|---|
+| `arn:aws:s3:::BUCKET` | the bucket itself | `s3:ListBucket`, `s3:GetBucketLocation`, `s3:GetBucketVersioning`, `s3:PutBucketPolicy`, `s3:DeleteBucket` |
+| `arn:aws:s3:::BUCKET/*` | every object key in it | `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject`, `s3:GetObjectVersion` |
+
+Bucket ARNs never match object keys and vice versa. With only `BUCKET/*`, roleC
+could read objects but `aws s3 ls s3://BUCKET` fails. With only `BUCKET`, it could
+list but not read or write. "Full access to one bucket" therefore needs **both**,
+and nothing broader.
+
+### Q4 - Would engine/ci long-lived access keys be used in real production?
+
+**No, not as the recommended design.** Long-lived IAM user access keys:
+
+- **Never expire.** A leaked key (committed to Git, printed in CI logs, left in a
+  laptop's `~/.aws/credentials` or a container image) works until someone notices
+  and deletes it.
+- **Must be stored somewhere.** Every copy (CI secret store, config file,
+  environment variable) is an attack surface, and they spread over time.
+- **Need manual rotation**, which is often skipped. Old keys stay active.
+- **Are hard to attribute and scope.** One key is often shared by several
+  pipelines or hosts, and it can't carry per-run context.
+
+For this reason Terraform here creates **no** access keys for engine and ci, and
+the real-AWS POC creates a temporary one for `engine` only for testing, deleted
+afterwards. If keys are unavoidable (a third-party system with no federation
+support), use one key per system, store it in a secrets manager, rotate it
+automatically, restrict it by source IP/VPC conditions, and alarm on its use.
+
+### Q5 - What should be used instead?
+
+| Who | Instead of IAM user + static key | Why |
+|---|---|---|
+| **CI/CD (ci)** | **OIDC / workload identity federation.** GitHub Actions gets an OIDC token and calls `sts:AssumeRoleWithWebIdentity` on a CI role whose trust policy is restricted to `repo:<org>/<repo>:ref:refs/heads/main` (or an environment). | No secret stored in GitHub. Credentials last minutes and are scoped per repository, branch or environment. |
+| **Workloads on AWS (engine)** | **IAM roles for compute**: EC2 instance profile, ECS task role, EKS IRSA / Pod Identity, Lambda execution role. | The SDK gets automatically rotated temporary credentials from the metadata/credential endpoint. Nothing to store. |
+| **Workloads outside AWS** | **IAM Roles Anywhere** (X.509 certificate) or OIDC federation. | Temporary credentials tied to a certificate or identity provider. |
+| **Humans (developer1/2)** | **IAM Identity Center** (SSO) with MFA, permission sets, and `aws sso login` for the CLI. | Central identity, no IAM users, short-lived CLI credentials, easy offboarding. |
+| **Everything** | **Assume IAM roles** that return temporary STS credentials (as roleB/roleC already do). | Credentials expire (1 hour here), every session is logged in CloudTrail with a session name, and access is revoked by editing one trust policy. |
+
+### Q6 - Why is trusting Account A root broader than trusting the roleB ARN?
+
+`"Principal": {"AWS": "arn:aws:iam::000000000000:root"}` does **not** mean "the
+root user". It means **the whole account**. roleC would delegate the decision to
+Account A: *any* IAM user or role in Account A whose identity policies allow
+`sts:AssumeRole` on roleC could assume it, and so could the root user.
+
+| Trust policy principal | Who can assume roleC |
+|---|---|
+| `arn:aws:iam::000000000000:role/roleB` (**implemented**) | Only sessions of roleB. |
+| `arn:aws:iam::000000000000:root` | roleB, **and** roleA (admin: `sts:AssumeRole` on `*`), **and** the Account A root user, **and** any role or user an Account A administrator creates or edits in the future. |
+
+Concretely (from the local model's counterfactual): with root trust, roleA and the
+Account A root user are ALLOWED into roleC. With the exact ARN they are DENIED.
+
+- **Account B loses control.** Who reaches its bucket depends on IAM changes made
+  in *another* account, which Account B can't review.
+- **Blast radius.** Compromising *any* sufficiently privileged Account A principal
+  (a leaked `ci` key with a broad policy, a misconfigured role) gives a path into
+  Account B.
+- **Least privilege.** The requirement is "only roleB", so the trust policy
+  should say exactly that.
+
+Caveat: an exact role ARN is resolved to the role's internal unique ID when the
+policy is saved. If roleB is deleted and recreated, roleC's trust shows an ID
+instead of the ARN and stops working until roleC is re-applied. That's a safety
+feature: a new role with the same name doesn't inherit the trust.

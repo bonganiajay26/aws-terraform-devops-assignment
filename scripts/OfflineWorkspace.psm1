@@ -74,4 +74,17 @@ function Get-RepoPluginDir {
     return (Join-Path $RepoRoot "$Stack\.terraform\providers")
 }
 
-Export-ModuleMember -Function Invoke-Terraform, New-OfflineWorkspace, Get-RepoPluginDir
+function Remove-TempWorkspace {
+    # Windows can keep the provider .exe locked for a moment after terraform exits;
+    # retry instead of silently leaving hundreds of MB behind in %TEMP%.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    for ($attempt = 1; $attempt -le 10; $attempt++) {
+        if (-not (Test-Path $Path)) { return }
+        Remove-Item -Recurse -Force $Path -ErrorAction SilentlyContinue
+        if (-not (Test-Path $Path)) { return }
+        Start-Sleep -Seconds 1
+    }
+    Write-Warning "Could not fully remove $Path (file still locked). Delete it manually."
+}
+
+Export-ModuleMember -Function Invoke-Terraform, New-OfflineWorkspace, Get-RepoPluginDir, Remove-TempWorkspace

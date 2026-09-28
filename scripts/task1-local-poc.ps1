@@ -230,7 +230,7 @@ try {
     $results['prevent_destroy blocks protected destroy'] = $demoOk
 }
 finally {
-    Remove-Item -Recurse -Force $tempRoot -ErrorAction SilentlyContinue
+    Remove-TempWorkspace -Path $tempRoot
 }
 
 # ----------------------------------------------------------------------

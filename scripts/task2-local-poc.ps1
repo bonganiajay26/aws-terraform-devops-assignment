@@ -288,7 +288,7 @@ try {
 }
 finally {
     foreach ($v in $awsVars) { [Environment]::SetEnvironmentVariable($v, $savedEnv[$v], 'Process') }
-    Remove-Item -Recurse -Force $tempRoot -ErrorAction SilentlyContinue
+    Remove-TempWorkspace -Path $tempRoot
 }
 
 # ----------------------------------------------------------------------

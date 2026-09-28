@@ -6,3 +6,13 @@ account_b_id = "111111111111"
 project_name = "aws-terraform-devops-assignment"
 environment  = "dev"
 owner        = "platform-team"
+
+# ----------------------------- Task 3 - IAM -----------------------------
+# roleC trusts EXACTLY arn:aws:iam::<account_a_id>:role/roleB.
+account_a_id = "000000000000"
+
+# The ONE bucket roleC may fully access (default: <project>-crossacct-<account_b_id>).
+# target_bucket_name = "my-unique-crossacct-bucket"
+
+# Second bucket used only to prove roleC is denied elsewhere (test D).
+create_control_bucket = true

@@ -48,3 +48,22 @@
 | `AccessControlListNotSupported` | ACLs disabled (BucketOwnerEnforced) | Intended. Use IAM / bucket policy |
 | `Instance cannot be destroyed` in bootstrap | `prevent_destroy` on bucket/table | Intended. Follow `tests/task2-test.md` section 3 |
 | Local lock demo: second process fails at once instead of waiting | Windows local backend uses a byte-range file lock and fails fast | Expected. `-lock-timeout` waiting is verified against DynamoDB in the real-AWS POC |
+
+## Task 3
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `MalformedPolicyDocument: Invalid principal in policy` creating roleC | roleB does not exist yet (or wrong `account_a_id`) | Apply account-a first; check `account_a_id` in account-b tfvars |
+| Same error creating roleA/roleB | Trusted users not created yet | Handled by `depends_on = [aws_iam_user.this]`; re-run apply |
+| `AccessDenied ... not authorized to perform: sts:AssumeRole on resource: ...roleC` from roleB | Side 1 (roleB identity policy) or side 2 (roleC trust) wrong | Compare `terraform output role_b_arn` (account-a) with `role_c_trusted_principal` (account-b); check `account_b_id` in account-a |
+| roleC trust shows `AROA...` instead of the roleB ARN | roleB was deleted/recreated; trust resolved to the old unique ID | Re-apply account-b so roleC trusts the new roleB |
+| `aws s3 ls s3://BUCKET` denied but GetObject works | Only `BUCKET/*` granted | roleC needs both bucket and `bucket/*` ARNs (as implemented) |
+| `aws s3 ls` (no bucket) denied for roleC | `s3:ListAllMyBuckets` not granted | Intended: roleC is scoped to one bucket |
+| developer1 cannot assume roleA | No MFA in the session | `aws sts assume-role ... --serial-number <mfa-arn> --token-code <code>` or sign in with MFA |
+| engine/ci cannot sign in to the console | No login profile (programmatic only) | Intended |
+| developer1/2 have no console password after apply | `console_pgp_key` not set, so Terraform creates no login profile (keeps passwords out of state) | Intended. `aws iam create-login-profile --password-reset-required`, or set `console_pgp_key` and re-apply |
+| `error encrypting password` / keybase lookup fails on apply | Invalid `console_pgp_key` | Use a valid base64 public key or an existing `keybase:<user>` |
+| `EntityAlreadyExists: User with name ... already exists` | Users/roles created manually before | `terraform import 'aws_iam_user.this["engine"]' engine` (or delete the manual one) |
+| `BucketAlreadyExists` for the target bucket | Global S3 namespace | Set `target_bucket_name` in account-b tfvars |
+| `DeleteConflict` destroying users | Keys/MFA added out of band | `force_destroy = true` handles it; otherwise delete keys first |
+| Task 3 POC shows `System.Object[]` or wrong counts | PowerShell 1-element-array unrolling | Use the committed script (the helper keeps arrays intact) |
